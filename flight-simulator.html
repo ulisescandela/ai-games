@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Flight Sim - RAINBOW DEBUG</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; color: white; font-family: monospace; }
+        #info {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(0,0,0,0.8); padding: 10px;
+            pointer-events: none; z-index: 100;
+        }
+        #error-log { color: red; font-weight: bold; }
+    </style>
+    <!-- Load Three.js from a reliable CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<div id="info">
+    <h2>DEBUG MODE: NO LIGHTS NEEDED</h2>
+    <p>If you see rainbow colors, it works.</p>
+    <p>Controls: W/S (Pitch), A/D (Roll), SHIFT (Speed)</p>
+    <div id="stats">Waiting for render...</div>
+    <div id="error-log"></div>
+</div>
+
+<script>
+    // 1. ERROR TRAPPING
+    window.onerror = function(msg, url, line) {
+        document.getElementById('error-log').innerHTML += `ERROR: ${msg}<br>Line: ${line}<br>`;
+    };
+
+    try {
+        // 2. SETUP
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222); // Dark Grey Background
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 3. MATERIALS (The "Magic" Fix)
+        // MeshNormalMaterial DOES NOT NEED LIGHT. It colors objects based on their angle.
+        // It is impossible for this to be black unless the object is missing.
+        const debugMat = new THREE.MeshNormalMaterial(); 
+        const wireMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+
+        // 4. OBJECTS
+        
+        // A. The Ground (Grid + Plane)
+        const grid = new THREE.GridHelper(2000, 50, 0xffffff, 0x444444);
+        scene.add(grid);
+
+        // Simple Terrain (Just some bumps)
+        const geometry = new THREE.PlaneGeometry(2000, 2000, 20, 20);
+        geometry.rotateX(-Math.PI / 2);
+        
+        // Displace vertices slightly
+        const pos = geometry.attributes.position;
+        for(let i=0; i < pos.count; i++){
+            const x = pos.getX(i);
+            const z = pos.getZ(i);
+            // Simple wave
+            const y = Math.sin(x/100) * Math.cos(z/100) * 50;
+            pos.setY(i, y - 50); // Move down so grid is on top
+        }
+        geometry.computeVertexNormals();
+        const terrain = new THREE.Mesh(geometry, new THREE.MeshNormalMaterial({ wireframe: true })); // Wireframe terrain
+        scene.add(terrain);
+
+
+        // B. The Player (Plane)
+        const planeGroup = new THREE.Group();
+        scene.add(planeGroup);
+
+        // Fuselage
+        const body = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 8), debugMat);
+        planeGroup.add(body);
+        // Wings
+        const wings = new THREE.Mesh(new THREE.BoxGeometry(12, 0.5, 3), debugMat);
+        planeGroup.add(wings);
+        // Tail
+        const tail = new THREE.Mesh(new THREE.BoxGeometry(4, 0.5, 2), debugMat);
+        tail.position.set(0, 1, 3);
+        planeGroup.add(tail);
+
+        // C. Reference Cube (Static, at 0,10,0)
+        // If you see this spinning cube, WebGL is working.
+        const cube = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), debugMat);
+        cube.position.set(0, 20, -50);
+        scene.add(cube);
+
+
+        // 5. GAME LOGIC
+        const player = {
+            pos: new THREE.Vector3(0, 100, 0),
+            rot: new THREE.Euler(0, 0, 0, 'YXZ'),
+            speed: 0
+        };
+        const keys = { w:0, s:0, a:0, d:0, shift:0 };
+
+        window.addEventListener('keydown', e => {
+            if(e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = 1;
+            if(e.key === 'Shift') keys.shift = 1;
+        });
+        window.addEventListener('keyup', e => {
+            if(e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = 0;
+            if(e.key === 'Shift') keys.shift = 0;
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Spin the debug cube
+            cube.rotation.x += 0.01;
+            cube.rotation.y += 0.01;
+
+            // Controls
+            if(keys.w) player.rot.x -= 0.02;
+            if(keys.s) player.rot.x += 0.02;
+            if(keys.a) player.rot.z += 0.03;
+            if(keys.d) player.rot.z -= 0.03;
+            
+            // Auto-level
+            if(!keys.a && !keys.d) player.rot.z *= 0.95;
+            if(!keys.w && !keys.s) player.rot.x *= 0.98;
+
+            // Turn (Yaw) based on Roll
+            player.rot.y += player.rot.z * 0.02;
+
+            // Speed
+            if(keys.shift) player.speed = Math.min(player.speed + 0.1, 5);
+            else player.speed = Math.max(player.speed - 0.05, 0);
+
+            // Move
+            const dir = new THREE.Vector3(0, 0, -1).applyEuler(player.rot).multiplyScalar(player.speed);
+            player.pos.add(dir);
+
+            // Update Plane
+            planeGroup.position.copy(player.pos);
+            planeGroup.rotation.copy(player.rot);
+
+            // Camera Chase
+            const offset = new THREE.Vector3(0, 5, 15).applyEuler(player.rot);
+            const camPos = player.pos.clone().add(offset);
+            camera.position.lerp(camPos, 0.1);
+            camera.lookAt(player.pos.clone().add(dir.multiplyScalar(10)));
+
+            // Stats
+            document.getElementById('stats').innerText = 
+                `POS: ${player.pos.x.toFixed(0)}, ${player.pos.y.toFixed(0)}\n` +
+                `SPD: ${player.speed.toFixed(1)}`;
+            
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+    } catch (err) {
+        document.getElementById('error-log').innerText = err.toString();
+    }
+</script>
+</body>
+</html>
