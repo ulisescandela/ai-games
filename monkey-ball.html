@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monkey Ball Clone - Levels</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; }
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 20px;
+            text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+            user-select: none;
+        }
+        #level-indicator {
+            position: absolute;
+            top: 80px;
+            width: 100%;
+            text-align: center;
+            color: #FFD700;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+        }
+        #game-over {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 10;
+        }
+        #msg {
+            font-size: 50px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px black;
+            font-weight: bold;
+        }
+        button {
+            font-size: 24px;
+            padding: 15px 30px;
+            cursor: pointer;
+            border: none;
+            border-radius: 50px;
+            background: #4CAF50;
+            color: white;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: transform 0.1s;
+            margin: 10px;
+        }
+        button:hover { transform: scale(1.05); background: #45a049; }
+        button:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+    <div id="info">
+        Usa <b>W, A, S, D</b> para inclinar el mundo<br>
+        Lleva la bola a la meta verde
+    </div>
+    <div id="level-select-container" style="position: absolute; top: 10px; right: 10px; z-index: 5;">
+        <select id="level-select" style="font-size: 16px; padding: 5px; cursor: pointer;">
+            <option value="0">Nivel 1</option>
+            <option value="1">Nivel 2</option>
+            <option value="2">Nivel 3</option>
+            <option value="3">Nivel 4</option>
+        </select>
+    </div>
+    <div id="level-indicator">Nivel 1</div>
+    <div id="game-over">
+        <div id="msg">¡Nivel Completado!</div>
+        <button id="next-btn">Siguiente Nivel</button>
+        <button id="retry-btn" style="display:none; background: #ff4444;">Reintentar</button>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "cannon-es": "https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import * as CANNON from 'cannon-es';
+
+        // --- Variables Globales ---
+        let scene, camera, renderer;
+        let world;
+        let ballBody, groundBody;
+        let ballMesh, groundMesh, goalMesh;
+        let obstaclesMeshes = [];
+        let isGameOver = false;
+        let currentLevelIndex = 0;
+
+        // Configuración
+        const PLATFORM_SIZE = 20;
+        const BALL_RADIUS = 0.5;
+        const MAX_TILT = 0.35;
+        const TILT_SPEED = 0.03;
+        
+        const keys = { w: false, a: false, s: false, d: false };
+        const currentTilt = { x: 0, z: 0 };
+
+        // Definición de Niveles
+        const levels = [
+            {
+                // Nivel 1: Simple
+                spawn: { x: 0, y: 5, z: 0 },
+                goal: { x: 8, y: 0.6, z: -8 },
+                obstacles: []
+            },
+            {
+                // Nivel 2: Obstáculos
+                spawn: { x: -8, y: 5, z: 8 },
+                goal: { x: 8, y: 0.6, z: -8 },
+                obstacles: [
+                    // Pared central
+                    { size: [2, 2, 12], pos: [0, 1, 0] },
+                    // Paredes laterales para molestar
+                    { size: [8, 2, 1], pos: [-5, 1, 0] },
+                    { size: [8, 2, 1], pos: [5, 1, 0] }
+                ]
+            },
+            {
+                // Nivel 3: Slalom
+                spawn: { x: 0, y: 5, z: 9 },
+                goal: { x: 0, y: 0.6, z: -9 },
+                obstacles: [
+                    // Bloqueo central inicial (Obliga a ir a los lados)
+                    { size: [12, 2, 1], pos: [0, 1, 5] },
+                    // Bloqueos laterales (Obliga a ir al centro)
+                    { size: [9, 2, 1], pos: [-6, 1, 0] },
+                    { size: [9, 2, 1], pos: [6, 1, 0] },
+                    // Bloqueo central final (Obliga a ir a los lados de nuevo)
+                    { size: [12, 2, 1], pos: [0, 1, -5] }
+                ]
+            },
+            {
+                // Nivel 4: La U
+                spawn: { x: 5, y: 5, z: 8 },
+                goal: { x: -5, y: 0.6, z: 8 },
+                obstacles: [
+                    // Muro central largo que separa inicio y fin
+                    { size: [2, 2, 15], pos: [0, 1, 2.5] },
+                    // Muro superior para cerrar el paso directo
+                    { size: [20, 2, 2], pos: [0, 1, -9] }
+                ]
+            }
+        ];
+
+        init();
+        animate();
+
+        function init() {
+            // 1. Three.js Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 60);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 25, 30); // Un poco más alto para ver mejor
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 20, 10);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            scene.add(dirLight);
+
+            // 2. Physics Setup
+            world = new CANNON.World();
+            world.gravity.set(0, -20, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+
+            const groundMat = new CANNON.Material();
+            const ballMat = new CANNON.Material();
+            const contactMat = new CANNON.ContactMaterial(groundMat, ballMat, {
+                friction: 0.05,
+                restitution: 0.1 // REDUCIDO: Menos rebote
+            });
+            world.addContactMaterial(contactMat);
+
+            // 3. Objetos Base
+            
+            // Suelo (Base)
+            const groundGeo = new THREE.BoxGeometry(PLATFORM_SIZE, 1, PLATFORM_SIZE);
+            const groundThreeMat = new THREE.MeshStandardMaterial({ color: 0xdeb887, roughness: 0.8 });
+            groundMesh = new THREE.Mesh(groundGeo, groundThreeMat);
+            groundMesh.receiveShadow = true;
+            scene.add(groundMesh);
+            
+            const grid = new THREE.GridHelper(PLATFORM_SIZE, 10, 0x555555, 0x999999);
+            grid.position.y = 0.51;
+            groundMesh.add(grid);
+
+            const groundShape = new CANNON.Box(new CANNON.Vec3(PLATFORM_SIZE/2, 0.5, PLATFORM_SIZE/2));
+            groundBody = new CANNON.Body({ mass: 0, material: groundMat });
+            groundBody.addShape(groundShape);
+            world.addBody(groundBody);
+
+            // Bola
+            const ballGeo = new THREE.SphereGeometry(BALL_RADIUS, 32, 32);
+            const ballThreeMat = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.4 });
+            ballMesh = new THREE.Mesh(ballGeo, ballThreeMat);
+            ballMesh.castShadow = true;
+            scene.add(ballMesh);
+
+            const ballShape = new CANNON.Sphere(BALL_RADIUS);
+            ballBody = new CANNON.Body({ mass: 1, material: ballMat });
+            ballBody.addShape(ballShape);
+            ballBody.linearDamping = 0.1; 
+            ballBody.angularDamping = 0.1;
+            world.addBody(ballBody);
+
+            // Meta
+            const goalGeo = new THREE.CylinderGeometry(1.5, 1.5, 0.2, 32);
+            const goalMat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x004400 });
+            goalMesh = new THREE.Mesh(goalGeo, goalMat);
+            groundMesh.add(goalMesh);
+
+            // Eventos
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('keydown', (e) => handleKey(e, true));
+            window.addEventListener('keyup', (e) => handleKey(e, false));
+            
+            document.getElementById('next-btn').addEventListener('click', nextLevel);
+            document.getElementById('retry-btn').addEventListener('click', restartLevel);
+            
+            // Selector de nivel
+            const levelSelect = document.getElementById('level-select');
+            levelSelect.addEventListener('change', (e) => {
+                loadLevel(parseInt(e.target.value));
+                // Quitar foco del select para que no interfiera con WASD
+                e.target.blur();
+            });
+
+            // Cargar Nivel 1
+            loadLevel(0);
+        }
+
+        function loadLevel(index) {
+            currentLevelIndex = index;
+            const data = levels[index];
+            
+            document.getElementById('level-indicator').textContent = `Nivel ${index + 1}`;
+            document.getElementById('level-select').value = index; // Sincronizar selector
+            isGameOver = false;
+            document.getElementById('game-over').style.display = 'none';
+
+            // Resetear Inclinación
+            currentTilt.x = 0;
+            currentTilt.z = 0;
+            groundBody.quaternion.set(0,0,0,1);
+            groundMesh.quaternion.set(0,0,0,1);
+
+            // Limpiar Obstáculos Anteriores
+            // Physics: Mantener solo el primer shape (el suelo base)
+            if (groundBody.shapes.length > 1) {
+                groundBody.shapes.splice(1);
+                groundBody.shapeOffsets.splice(1);
+                groundBody.shapeOrientations.splice(1);
+                groundBody.updateMassProperties();
+            }
+            // Visual: Eliminar meshes de obstáculos
+            obstaclesMeshes.forEach(m => groundMesh.remove(m));
+            obstaclesMeshes = [];
+
+            // Cargar Nuevos Obstáculos
+            data.obstacles.forEach(obs => {
+                // Physics
+                const shape = new CANNON.Box(new CANNON.Vec3(obs.size[0]/2, obs.size[1]/2, obs.size[2]/2));
+                const offset = new CANNON.Vec3(obs.pos[0], obs.pos[1], obs.pos[2]);
+                groundBody.addShape(shape, offset);
+
+                // Visual
+                const geo = new THREE.BoxGeometry(obs.size[0], obs.size[1], obs.size[2]);
+                const mat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(obs.pos[0], obs.pos[1], obs.pos[2]);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                groundMesh.add(mesh);
+                obstaclesMeshes.push(mesh);
+            });
+
+            // Posicionar Meta
+            goalMesh.position.set(data.goal.x, data.goal.y, data.goal.z);
+
+            // Posicionar Bola
+            ballBody.position.set(data.spawn.x, data.spawn.y, data.spawn.z);
+            ballBody.velocity.set(0,0,0);
+            ballBody.angularVelocity.set(0,0,0);
+            ballBody.quaternion.set(0,0,0,1);
+        }
+
+        function nextLevel() {
+            if (currentLevelIndex < levels.length - 1) {
+                loadLevel(currentLevelIndex + 1);
+            } else {
+                // Volver al principio o reiniciar
+                loadLevel(0);
+            }
+        }
+
+        function restartLevel() {
+            loadLevel(currentLevelIndex);
+        }
+
+        function handleKey(e, isDown) {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = isDown;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isGameOver) return;
+
+            const dt = 1 / 60;
+
+            // Input
+            const inputX = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
+            const inputY = (keys.s ? 1 : 0) - (keys.w ? 1 : 0);
+            
+            if (inputY !== 0) currentTilt.x += inputY * TILT_SPEED;
+            else currentTilt.x *= 0.92;
+            
+            if (inputX !== 0) currentTilt.z -= inputX * TILT_SPEED; 
+            else currentTilt.z *= 0.92;
+
+            currentTilt.x = Math.max(-MAX_TILT, Math.min(MAX_TILT, currentTilt.x));
+            currentTilt.z = Math.max(-MAX_TILT, Math.min(MAX_TILT, currentTilt.z));
+
+            // --- PHYSICS FIX: Rotate Gravity, Keep Floor Flat ---
+            // Instead of rotating the physics floor (which catapults the ball),
+            // we keep the physics floor flat and rotate the gravity vector.
+            
+            // 1. Calculate Tilt Quaternion
+            const tiltQuat = new THREE.Quaternion();
+            tiltQuat.setFromEuler(new THREE.Euler(currentTilt.x, 0, currentTilt.z));
+
+            // 2. Rotate Gravity (Inverse of tilt)
+            // If floor tilts left, gravity should pull left (relative to flat floor)
+            const gravityVector = new THREE.Vector3(0, -20, 0);
+            const inverseTilt = tiltQuat.clone().invert();
+            gravityVector.applyQuaternion(inverseTilt);
+            world.gravity.set(gravityVector.x, gravityVector.y, gravityVector.z);
+
+            // 3. Physics Step (Floor is static/flat)
+            world.step(dt);
+
+            // 4. Visual Sync
+            // Rotate the visual ground to match tilt
+            groundMesh.quaternion.copy(tiltQuat);
+
+            // Position the visual ball by rotating its physics position
+            // Physics pos is on flat plane -> Rotate it to match tilted plane
+            const visualBallPos = new THREE.Vector3(ballBody.position.x, ballBody.position.y, ballBody.position.z);
+            visualBallPos.applyQuaternion(tiltQuat);
+            ballMesh.position.copy(visualBallPos);
+
+            // Rotate visual ball (combine tilt + rolling rotation)
+            const ballRollQuat = new THREE.Quaternion(
+                ballBody.quaternion.x,
+                ballBody.quaternion.y,
+                ballBody.quaternion.z,
+                ballBody.quaternion.w
+            );
+            ballMesh.quaternion.copy(tiltQuat).multiply(ballRollQuat);
+
+            checkGameLogic();
+            renderer.render(scene, camera);
+        }
+
+        function checkGameLogic() {
+            // Caída
+            if (ballBody.position.y < -10) {
+                endGame(false);
+            }
+
+            // Meta
+            const goalPos = new THREE.Vector3();
+            goalMesh.getWorldPosition(goalPos);
+            const dist = ballMesh.position.distanceTo(goalPos);
+            
+            if (dist < 1.5) {
+                endGame(true);
+            }
+        }
+
+        function endGame(win) {
+            isGameOver = true;
+            const el = document.getElementById('game-over');
+            const msg = document.getElementById('msg');
+            const nextBtn = document.getElementById('next-btn');
+            const retryBtn = document.getElementById('retry-btn');
+            
+            el.style.display = 'flex';
+            
+            if (win) {
+                msg.style.color = "#44ff44";
+                if (currentLevelIndex < levels.length - 1) {
+                    msg.textContent = "¡NIVEL COMPLETADO!";
+                    nextBtn.style.display = 'block';
+                    nextBtn.textContent = "Siguiente Nivel";
+                    retryBtn.style.display = 'none';
+                } else {
+                    msg.textContent = "¡JUEGO COMPLETADO!";
+                    nextBtn.style.display = 'block';
+                    nextBtn.textContent = "Jugar de Nuevo";
+                    retryBtn.style.display = 'none';
+                }
+            } else {
+                msg.textContent = "¡CAÍSTE!";
+                msg.style.color = "#ff4444";
+                nextBtn.style.display = 'none';
+                retryBtn.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>
