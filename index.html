@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arcade AI Games</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-top: 50px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-transform: uppercase;
+            letter-spacing: 5px;
+        }
+
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 30px;
+            max-width: 1200px;
+            padding: 40px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            width: 250px;
+            text-align: center;
+            transition: transform 0.3s, background 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-decoration: none;
+            color: white;
+        }
+
+        .card:hover {
+            transform: translateY(-10px);
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.4);
+        }
+
+        .card-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .card-desc {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            line-height: 1.4;
+        }
+
+        footer {
+            margin-top: auto;
+            padding: 20px;
+            opacity: 0.6;
+        }
+
+        .ad-banner {
+            width: 100%;
+            background: linear-gradient(90deg, #6a11cb 0%, #2575fc 100%);
+            color: #fff;
+            text-align: center;
+            padding: 15px 0;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 1.1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+        }
+
+        .ad-banner:hover {
+            transform: scale(1.01);
+            text-decoration: underline;
+        }
+
+        body {
+            padding-top: 60px; /* Space for the fixed banner */
+        }
+    </style>
+</head>
+<body>
+
+    <a href="https://socialpostai.lovable.app" target="_blank" class="ad-banner">
+        🚀 Create Social Media Posts That Generate Leads - Visit SocialPostAI
+    </a>
+
+    <h1>Arcade AI Hub</h1>
+
+    <div class="container">
+        <a href="monkey-ball.html" class="card">
+            <span class="card-icon">🐒</span>
+            <span class="card-title">Monkey Ball Clone</span>
+            <span class="card-desc">Tilt the world and guide the ball to the goal. Now with 5 levels!</span>
+        </a>
+
+        <a href="shooter.html" class="card">
+            <span class="card-icon">🔫</span>
+            <span class="card-title">FPS Shooter</span>
+            <span class="card-desc">Simple survival. Shoot the red cubes before they catch you.</span>
+        </a>
+
+        <a href="juego.html" class="card">
+            <span class="card-icon">🧟</span>
+            <span class="card-title">Mob Control</span>
+            <span class="card-desc">Control crowds of humanoids and shooting mechanics.</span>
+        </a>
+
+        <a href="flight-simulator.html" class="card">
+            <span class="card-icon">✈️</span>
+            <span class="card-title">Flight Simulator</span>
+            <span class="card-desc">Fly through the skies in this basic flight simulator.</span>
+        </a>
+
+        <a href="flappy-bird.html" class="card">
+            <span class="card-icon">🐦</span>
+            <span class="card-title">Flappy Clone</span>
+            <span class="card-desc">The classic game of dodging pipes by jumping.</span>
+        </a>
+    </div>
+
+    <footer>
+        Created with AI 🤖
+    </footer>
+
+</body>
+</html>

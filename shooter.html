@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple FPS Shooter</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            transform: translate(-50%, -50%);
+            background-image: radial-gradient(circle, red 2px, transparent 0);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        #instructions {
+            position: absolute;
+            top: 50%;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            background: rgba(0,0,0,0.5);
+            padding: 20px 0;
+        }
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 20px;
+            pointer-events: none;
+        }
+        #health-bar-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 200px;
+            height: 20px;
+            background: #333;
+            border: 2px solid white;
+        }
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background: #00ff00;
+            transition: width 0.2s;
+        }
+    </style>
+</head>
+<body>
+    <div id="crosshair"></div>
+    <div id="hud">Enemigos: <span id="score">0</span></div>
+    <div id="health-bar-container"><div id="health-bar"></div></div>
+    <div id="instructions">
+        Haz clic para empezar<br>
+        WASD - Moverse<br>
+        Click - Disparar
+    </div>
+
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        let camera, scene, renderer, controls;
+        let raycaster;
+        let moveForward = false;
+        let moveBackward = false;
+        let moveLeft = false;
+        let moveRight = false;
+        let prevTime = performance.now();
+        const velocity = new THREE.Vector3();
+        const direction = new THREE.Vector3();
+        
+        // Game State
+        let bullets = [];
+        let enemies = [];
+        let score = 0;
+        let health = 100;
+        let isGameOver = false;
+        let lastEnemySpawn = 0;
+
+        init();
+        animate();
+
+        function init() {
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
+            camera.position.y = 10;
+
+            scene = new THREE.Scene();
+            // Skybox bonito: Color azul cielo y niebla suave
+            scene.background = new THREE.Color(0x87CEEB); 
+            scene.fog = new THREE.Fog(0x87CEEB, 0, 100);
+
+            // Iluminación mejorada
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+            hemiLight.position.set(0, 200, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 200, 100);
+            dirLight.castShadow = true;
+            // Configurar sombras
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.top = 100;
+            dirLight.shadow.camera.bottom = -100;
+            dirLight.shadow.camera.left = -100;
+            dirLight.shadow.camera.right = 100;
+            dirLight.shadow.bias = -0.0001;
+            scene.add(dirLight);
+
+            controls = new PointerLockControls(camera, document.body);
+
+            const instructions = document.getElementById('instructions');
+            instructions.addEventListener('click', function () {
+                controls.lock();
+            });
+
+            controls.addEventListener('lock', function () {
+                instructions.style.display = 'none';
+            });
+
+            controls.addEventListener('unlock', function () {
+                instructions.style.display = 'block';
+                if(isGameOver) location.reload();
+            });
+
+            scene.add(controls.getObject());
+
+            // Listeners Movement
+            const onKeyDown = function (event) {
+                switch (event.code) {
+                    case 'ArrowUp':
+                    case 'KeyW': moveForward = true; break;
+                    case 'ArrowLeft':
+                    case 'KeyA': moveLeft = true; break;
+                    case 'ArrowDown':
+                    case 'KeyS': moveBackward = true; break;
+                    case 'ArrowRight':
+                    case 'KeyD': moveRight = true; break;
+                }
+            };
+
+            const onKeyUp = function (event) {
+                switch (event.code) {
+                    case 'ArrowUp':
+                    case 'KeyW': moveForward = false; break;
+                    case 'ArrowLeft':
+                    case 'KeyA': moveLeft = false; break;
+                    case 'ArrowDown':
+                    case 'KeyS': moveBackward = false; break;
+                    case 'ArrowRight':
+                    case 'KeyD': moveRight = false; break;
+                }
+            };
+            
+            // Shooting
+            const onMouseDown = function () {
+                if (controls.isLocked && !isGameOver) shoot();
+            };
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseDown);
+
+            raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, - 1, 0), 0, 10);
+
+            // Suelo con sombras (Hierba)
+            const floorGeometry = new THREE.PlaneGeometry(2000, 2000);
+            floorGeometry.rotateX(- Math.PI / 2);
+            const floorMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x4CAF50, // Verde hierba
+                roughness: 0.8 
+            });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.receiveShadow = true;
+            scene.add(floor);
+            
+            // Decoración (Environment)
+            addEnvironment();
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true; // Activar sombras
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function addEnvironment() {
+            // Añadir algunos árboles simples y rocas
+            for(let i=0; i<50; i++) {
+                // Árboles (Cilindro tronco + Cono hojas)
+                const x = (Math.random() - 0.5) * 400;
+                const z = (Math.random() - 0.5) * 400;
+                
+                // Evitar zona inicial
+                if(Math.abs(x) < 20 && Math.abs(z) < 20) continue;
+
+                // Tronco
+                const trunkGeo = new THREE.CylinderGeometry(1, 1, 4);
+                const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+                const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                trunk.position.set(x, 2, z);
+                trunk.castShadow = true;
+                trunk.receiveShadow = true;
+                scene.add(trunk);
+
+                // Hojas
+                const leavesGeo = new THREE.ConeGeometry(3, 8);
+                const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+                const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+                leaves.position.set(x, 7, z);
+                leaves.castShadow = true;
+                leaves.receiveShadow = true;
+                scene.add(leaves);
+            }
+
+            // Rocas (Icosaedros deformados)
+            for(let i=0; i<30; i++) {
+                const x = (Math.random() - 0.5) * 400;
+                const z = (Math.random() - 0.5) * 400;
+                if(Math.abs(x) < 20 && Math.abs(z) < 20) continue;
+
+                const rockGeo = new THREE.DodecahedronGeometry(Math.random() * 2 + 1);
+                const rockMat = new THREE.MeshStandardMaterial({ color: 0x808080 });
+                const rock = new THREE.Mesh(rockGeo, rockMat);
+                rock.position.set(x, 1, z);
+                rock.castShadow = true;
+                rock.receiveShadow = true;
+                rock.rotation.set(Math.random(), Math.random(), Math.random());
+                scene.add(rock);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function shoot() {
+            const bulletGeo = new THREE.SphereGeometry(0.2, 8, 8);
+            const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const bullet = new THREE.Mesh(bulletGeo, bulletMat);
+            
+            // Set bullet position at camera + direction
+            bullet.position.copy(camera.position);
+            
+            // Get camera direction
+            const dir = new THREE.Vector3();
+            camera.getWorldDirection(dir);
+            
+            // Create velocity vector
+            bullet.userData.velocity = dir.multiplyScalar(2); // Speed
+            
+            scene.add(bullet);
+            bullets.push(bullet);
+        }
+
+        function spawnEnemy() {
+            const size = 3;
+            const enemyGeo = new THREE.BoxGeometry(size, size, size);
+            const enemyMat = new THREE.MeshStandardMaterial({ 
+                color: 0xff0000, 
+                roughness: 0, 
+                metalness: 0.5 
+            });
+            const enemy = new THREE.Mesh(enemyGeo, enemyMat);
+            
+            // Random position around player
+            const angle = Math.random() * Math.PI * 2;
+            const distance = 40 + Math.random() * 40;
+            const x = controls.getObject().position.x + Math.cos(angle) * distance;
+            const z = controls.getObject().position.z + Math.sin(angle) * distance;
+            
+            enemy.position.set(x, size/2, z);
+            enemy.castShadow = true;
+            enemy.receiveShadow = true;
+            scene.add(enemy);
+            enemies.push(enemy);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = performance.now();
+            const delta = (time - prevTime) / 1000;
+
+            if (controls.isLocked) {
+                // Movement Logic
+                velocity.x -= velocity.x * 10.0 * delta;
+                velocity.z -= velocity.z * 10.0 * delta;
+                velocity.y -= 9.8 * 100.0 * delta; // 100.0 = mass
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize(); // Ensure consistent speed in all directions
+
+                if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+                controls.moveRight(- velocity.x * delta);
+                controls.moveForward(- velocity.z * delta);
+                
+                // Simple collisions with ground (y = 10 height)
+                if (controls.getObject().position.y < 10) velocity.y = 0;
+                controls.getObject().position.y = 10;
+
+                // --- Game Logic ---
+
+                // Spawn Enemies
+                if (time - lastEnemySpawn > 2000) { // Every 2 seconds
+                    spawnEnemy();
+                    lastEnemySpawn = time;
+                }
+
+                // Update Bullets
+                for(let i = bullets.length - 1; i >= 0; i--) {
+                    const b = bullets[i];
+                    b.position.add(b.userData.velocity);
+                    
+                    // Cleanup far bullets
+                    if(b.position.distanceTo(controls.getObject().position) > 100) {
+                        scene.remove(b);
+                        bullets.splice(i, 1);
+                        continue;
+                    }
+
+                    // Collision Bullet-Enemy
+                    for(let j = enemies.length - 1; j >= 0; j--) {
+                        const e = enemies[j];
+                        if (b.position.distanceTo(e.position) < 2) { // Hit
+                            scene.remove(e);
+                            enemies.splice(j, 1);
+                            
+                            scene.remove(b);
+                            bullets.splice(i, 1);
+                            
+                            score++;
+                            document.getElementById('score').textContent = score;
+                            break;
+                        }
+                    }
+                }
+
+                // Update Enemies
+                for(let i = 0; i < enemies.length; i++) {
+                    const e = enemies[i];
+                    const playerPos = controls.getObject().position;
+                    
+                    // Move towards player
+                    const dir = new THREE.Vector3().subVectors(playerPos, e.position).normalize();
+                    e.position.add(dir.multiplyScalar(0.1)); // Enemy speed
+                    e.lookAt(playerPos);
+
+                    // Damage Player
+                    if(e.position.distanceTo(playerPos) < 3) {
+                        health -= 1;
+                        document.getElementById('health-bar').style.width = health + '%';
+                        if(health <= 0) {
+                            health = 0;
+                            isGameOver = true;
+                            controls.unlock();
+                            document.getElementById('instructions').innerHTML = "<h1 style='color:red;'>GAME OVER</h1>Haz clic para reiniciar";
+                        }
+                    }
+                }
+            }
+
+            prevTime = time;
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>

@@ -75,6 +75,7 @@
             <option value="1">Nivel 2</option>
             <option value="2">Nivel 3</option>
             <option value="3">Nivel 4</option>
+            <option value="4">Nivel 5</option>
         </select>
     </div>
     <div id="level-indicator">Nivel 1</div>
@@ -159,6 +160,22 @@
                     { size: [2, 2, 15], pos: [0, 1, 2.5] },
                     // Muro superior para cerrar el paso directo
                     { size: [20, 2, 2], pos: [0, 1, -9] }
+                ]
+            },
+            {
+                // Nivel 5: Laberinto
+                spawn: { x: -8, y: 5, z: 8 },
+                goal: { x: 8, y: 0.6, z: -8 },
+                obstacles: [
+                    // Paredes Horizontales
+                    { size: [6, 2, 1], pos: [-4, 1, 4] },
+                    { size: [6, 2, 1], pos: [4, 1, 0] },
+                    { size: [6, 2, 1], pos: [-4, 1, -4] },
+                    
+                    // Paredes Verticales
+                    { size: [1, 2, 6], pos: [0, 1, 6] },
+                    { size: [1, 2, 6], pos: [0, 1, -2] },
+                    { size: [1, 2, 4], pos: [-6, 1, 0] }
                 ]
             }
         ];
