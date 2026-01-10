@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Stack Tower - AI Games</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; user-select: none; }
+        #score {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            font-size: 3rem;
+            color: white;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            pointer-events: none;
+            z-index: 10;
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            z-index: 20;
+        }
+        h1 { margin: 0 0 20px; color: #333; }
+        p { font-size: 1.2rem; color: #666; }
+        button {
+            background: #FF4757;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 1.2rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-top: 20px;
+        }
+        button:hover { transform: scale(1.05); background: #FF6B81; }
+        #instructions {
+            position: absolute;
+            bottom: 30px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255,255,255,0.7);
+            font-size: 1.2rem;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">0</div>
+    <div id="game-over">
+        <h1>GAME OVER</h1>
+        <p>You stacked <span id="final-score">0</span> blocks!</p>
+        <button onclick="resetGame()">Play Again</button>
+    </div>
+    <div id="instructions">Tap or Spacebar to place block</div>
+
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <script>
+        // Game Configuration
+        const BOX_HEIGHT = 1;
+        const ORIGINAL_BOX_SIZE = 3;
+        const SPEED = 0.05;
+        const CAMERA_Y_OFFSET = 4;
+        const CAMERA_ZOOM = 2; // Higher value = closer zoom for Orthographic
+
+        // State
+        let stack = [];
+        let overhangs = [];
+        let score = 0;
+        let gameRunning = false;
+        let currentLayerIndex = 0;
+        let cameraTargets = { x: 0, y: 0, z: 0 }; // For smooth camera lerp
+
+        // Scene Setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xabcdef);
+        // Reduced fog significantly (starts further away)
+        scene.fog = new THREE.Fog(0xabcdef, 30, 90);
+
+        // Orthographic Camera for that isometric arcade look
+        const aspect = window.innerWidth / window.innerHeight;
+        const d = 10;
+        const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
+        
+        camera.position.set(10, 10, 10);
+        camera.lookAt(0, 0, 0);
+
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight.position.set(10, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // Helper: Create a Box
+        function createBox(x, y, z, width, depth, color) {
+            const geometry = new THREE.BoxGeometry(width, BOX_HEIGHT, depth);
+            const material = new THREE.MeshStandardMaterial({ 
+                color: color,
+                flatShading: true // Low-poly look
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x, y, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            return mesh;
+        }
+
+        // Helper: Generate Color based on layer
+        function getLayerColor(index) {
+            return new THREE.Color(`hsl(${0 + (index * 8) % 360}, 70%, 60%)`);
+        }
+
+        function initGame() {
+            // Clear old stack
+            stack.forEach(item => {
+                if (item.mesh) scene.remove(item.mesh);
+            });
+            overhangs.forEach(o => scene.remove(o.mesh));
+            stack = [];
+            overhangs = [];
+            score = 0;
+            currentLayerIndex = 1; // 0 is base
+            document.getElementById('score').innerText = score;
+            document.getElementById('game-over').style.display = 'none';
+
+            // Reset Camera pos
+            camera.position.set(10, 10, 10);
+            camera.lookAt(0, 0, 0);
+            cameraTargets = { y: 10 };
+
+            // Create Base
+            const base = createBox(0, 0, 0, ORIGINAL_BOX_SIZE, ORIGINAL_BOX_SIZE, getLayerColor(0));
+            scene.add(base);
+            stack.push({
+                mesh: base,
+                width: ORIGINAL_BOX_SIZE,
+                depth: ORIGINAL_BOX_SIZE,
+                x: 0,
+                z: 0
+            });
+
+            // Create First Moving Block
+            addLayer();
+            gameRunning = true;
+        }
+
+        function addLayer() {
+            const prevLayer = stack[stack.length - 1]; // This is the stationary base for the new layer
+            
+            // Determine direction (Alternating X and Z)
+            const direction = currentLayerIndex % 2 === 0 ? 'x' : 'z';
+
+            const layer = createBox(0, currentLayerIndex * BOX_HEIGHT, 0, prevLayer.width, prevLayer.depth, getLayerColor(currentLayerIndex));
+            
+            // Set starting position far out
+            if (direction === 'x') {
+                layer.position.x = -10;
+                layer.position.z = prevLayer.z;
+            } else {
+                layer.position.z = -10;
+                layer.position.x = prevLayer.x;
+            }
+
+            scene.add(layer);
+            
+            stack.push({
+                mesh: layer,
+                width: prevLayer.width,
+                depth: prevLayer.depth,
+                direction: direction,
+                speed: SPEED + (currentLayerIndex * 0.005) // Gets slightly faster
+            });
+        }
+
+        function placeBlock() {
+            if (!gameRunning) return;
+
+            const currentLayer = stack[stack.length - 1];
+            const prevLayer = stack[stack.length - 2];
+
+            const direction = currentLayer.direction;
+            
+            let delta = 0;
+            let overhangSize = 0;
+            let overlap = 0;
+            let pos = currentLayer.mesh.position[direction];
+            let prevPos = prevLayer[direction];
+            let size = direction === 'x' ? currentLayer.width : currentLayer.depth;
+
+            delta = pos - prevPos;
+            overhangSize = Math.abs(delta);
+            overlap = size - overhangSize;
+
+            if (overlap > 0) {
+                // Determine new dimensions
+                let newWidth = currentLayer.width;
+                let newDepth = currentLayer.depth;
+                let newX = currentLayer.mesh.position.x;
+                let newZ = currentLayer.mesh.position.z;
+
+                // Cut logic
+                if (direction === 'x') {
+                    newWidth = overlap;
+                    newX = prevPos + delta / 2;
+                } else {
+                    newDepth = overlap;
+                    newZ = prevPos + delta / 2;
+                }
+
+                // Update current layer mesh to be the "cut" version
+                scene.remove(currentLayer.mesh);
+                const cutLayerMesh = createBox(newX, currentLayer.mesh.position.y, newZ, newWidth, newDepth, getLayerColor(currentLayerIndex));
+                scene.add(cutLayerMesh);
+
+                // Update stack data
+                currentLayer.mesh = cutLayerMesh;
+                currentLayer.width = newWidth;
+                currentLayer.depth = newDepth;
+                currentLayer.x = newX;
+                currentLayer.z = newZ;
+
+                // Visual: Add the falling overhang piece
+                createOverhang(
+                    direction === 'x' ? (pos > prevPos ? newX + newWidth/2 + overhangSize/2 : newX - newWidth/2 - overhangSize/2) : newX,
+                    currentLayer.mesh.position.y,
+                    direction === 'z' ? (pos > prevPos ? newZ + newDepth/2 + overhangSize/2 : newZ - newDepth/2 - overhangSize/2) : newZ,
+                    direction === 'x' ? overhangSize : newWidth,
+                    direction === 'z' ? overhangSize : newDepth,
+                    getLayerColor(currentLayerIndex)
+                );
+
+                // Next level
+                score++;
+                document.getElementById('score').innerText = score;
+                currentLayerIndex++;
+                addLayer();
+
+            } else {
+                endGame();
+            }
+        }
+
+        function createOverhang(x, y, z, width, depth, color) {
+            const mesh = createBox(x, y, z, width, depth, color);
+            scene.add(mesh);
+            overhangs.push({
+                mesh: mesh,
+                vy: 0,
+                rx: Math.random() * 0.1,
+                rz: Math.random() * 0.1
+            });
+        }
+
+        function endGame() {
+            gameRunning = false;
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('game-over').style.display = 'block';
+        }
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (gameRunning) {
+                const currentLayer = stack[stack.length - 1];
+                const time = Date.now() * 0.002 * currentLayer.speed;
+                
+                // Move current block back and forth
+                // Use sine wave for smooth movement extension
+                // Limit roughly -6 to 6
+                const range = 6;
+                // Simple oscillating movement
+                const moveVal = Math.sin(Date.now() * 0.005 * (1 + score*0.05)) * range;
+                
+                // However, linear is better for stacking precision games usually, 
+                // but let's stick to a clamp ping-pong for fairness if we want.
+                // Or simplified sine for "arcade" feel. 
+                // Let's implement a simple linear PingPong manually for precision.
+            }
+        }
+        
+        // Better loop for movement
+        let moveTime = 0;
+        renderer.setAnimationLoop(() => {
+            // Physics for overhangs
+            for (let i = overhangs.length - 1; i >= 0; i--) {
+                const o = overhangs[i];
+                o.mesh.position.y -= 0.2; // Fall
+                o.mesh.rotation.x += o.rx;
+                o.mesh.rotation.z += o.rz;
+                if (o.mesh.position.y < -10) {
+                    scene.remove(o.mesh);
+                    overhangs.splice(i, 1);
+                }
+            }
+
+            if (gameRunning && stack.length > 1) {
+                const currentLayer = stack[stack.length - 1];
+                const speed = SPEED + (score * 0.005);
+                moveTime += speed;
+                
+                // Simple oscillating movement logic
+                // We base it on time but we need linear motion for fairness? 
+                // Actually sine is predictable enough for arcade.
+                // Let's use Math.sin + range relative to base.
+                // But we need it to strictly align with axes.
+                
+                const range = 5; 
+                // Speed needs to be consistent. "SPEED" logic needs to adjust the frequency
+                // Date.now is too fast, lets use a custom time accumulator or scale Date.now
+                const val = Math.sin(Date.now() * 0.0015 * (1 + score * 0.05)) * range;
+                
+                if (currentLayer.direction === 'x') {
+                    currentLayer.mesh.position.x = currentLayer.z + val; // Offset by Z? No, just oscillate around center or prev pos? 
+                    // Actually, usually it oscillates around the center of the world (0)
+                    currentLayer.mesh.position.x = val;
+                } else {
+                    currentLayer.mesh.position.z = val;
+                }
+            }
+
+            // Move Camera Up smoothly
+            const targetY = currentLayerIndex * BOX_HEIGHT + 5;
+            camera.position.y += (targetY - camera.position.y) * 0.05;
+            camera.lookAt(0, camera.position.y - 10, 0); // Keep looking at stack top area
+
+            renderer.render(scene, camera);
+        });
+
+
+        // Inputs
+        window.addEventListener('mousedown', placeBlock);
+        window.addEventListener('touchstart', (e) => { e.preventDefault(); placeBlock(); }, {passive: false});
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') placeBlock();
+        });
+
+        window.addEventListener('resize', () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -d * aspect;
+            camera.right = d * aspect;
+            camera.top = d;
+            camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Global function for HTML button
+        window.resetGame = initGame;
+
+        // Start
+        initGame();
+
+    </script>
+</body>
+</html>
