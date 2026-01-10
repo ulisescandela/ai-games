@@ -72,7 +72,7 @@
         // Game Configuration
         const BOX_HEIGHT = 1;
         const ORIGINAL_BOX_SIZE = 3;
-        const SPEED = 0.05;
+        const SPEED = 0.15;
         const CAMERA_Y_OFFSET = 4;
         const CAMERA_ZOOM = 2; // Higher value = closer zoom for Orthographic
 
@@ -176,12 +176,18 @@
 
             const layer = createBox(0, currentLayerIndex * BOX_HEIGHT, 0, prevLayer.width, prevLayer.depth, getLayerColor(currentLayerIndex));
             
-            // Set starting position far out
+            // Set starting position far out (linear approach logic)
+            // Even layers (X) start Left (-), Odd layers (Z) start Right (+) or vice versa for variety
+            // Just picking one consistent "From Distance" logic:
+            const spawnDistance = 8;
+            // Alternate side based on random or index? Index is better for rhythm.
+            const startSign = (currentLayerIndex % 2 === 0) ? -1 : 1; 
+
             if (direction === 'x') {
-                layer.position.x = -10;
+                layer.position.x = spawnDistance * startSign;
                 layer.position.z = prevLayer.z;
             } else {
-                layer.position.z = -10;
+                layer.position.z = spawnDistance * startSign;
                 layer.position.x = prevLayer.x;
             }
 
@@ -192,7 +198,8 @@
                 width: prevLayer.width,
                 depth: prevLayer.depth,
                 direction: direction,
-                speed: SPEED + (currentLayerIndex * 0.005) // Gets slightly faster
+                // Initial velocity is towards center (opposite of sign)
+                velocity: -(SPEED + (currentLayerIndex * 0.005)) * startSign
             });
         }
 
@@ -304,7 +311,6 @@
         }
         
         // Better loop for movement
-        let moveTime = 0;
         renderer.setAnimationLoop(() => {
             // Physics for overhangs
             for (let i = overhangs.length - 1; i >= 0; i--) {
@@ -320,26 +326,15 @@
 
             if (gameRunning && stack.length > 1) {
                 const currentLayer = stack[stack.length - 1];
-                const speed = SPEED + (score * 0.005);
-                moveTime += speed;
+                const dir = currentLayer.direction;
                 
-                // Simple oscillating movement logic
-                // We base it on time but we need linear motion for fairness? 
-                // Actually sine is predictable enough for arcade.
-                // Let's use Math.sin + range relative to base.
-                // But we need it to strictly align with axes.
+                // Absolute linear movement
+                currentLayer.mesh.position[dir] += currentLayer.velocity;
                 
-                const range = 5; 
-                // Speed needs to be consistent. "SPEED" logic needs to adjust the frequency
-                // Date.now is too fast, lets use a custom time accumulator or scale Date.now
-                const val = Math.sin(Date.now() * 0.0015 * (1 + score * 0.05)) * range;
-                
-                if (currentLayer.direction === 'x') {
-                    currentLayer.mesh.position.x = currentLayer.z + val; // Offset by Z? No, just oscillate around center or prev pos? 
-                    // Actually, usually it oscillates around the center of the world (0)
-                    currentLayer.mesh.position.x = val;
-                } else {
-                    currentLayer.mesh.position.z = val;
+                // Ping Pong bounce at limits
+                // Spawn was at 8, so limit 9 is safe
+                if (Math.abs(currentLayer.mesh.position[dir]) > 9) {
+                     currentLayer.velocity *= -1;
                 }
             }
 
